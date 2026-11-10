@@ -1,0 +1,19 @@
+# Claude Science 0.1.72 — self-contained instance rooted in this folder.
+#
+# Every location the app downloads to or writes into is pinned below.
+# Defaults for the other roots (artifacts, workspaces, staging,
+# tool-results, compaction-history, r-libs, runtime, electron engine)
+# already resolve under data_dir; the keys here are the ones whose
+# defaults point at the user profile or the system temp folder.
+
+data_dir = 'D:/project/aster-science/claude-science-data'
+
+[paths]
+# App's own folder: encryption keys, DPAPI copies, trusted-folder
+# registry. Default would be %USERPROFILE%\.claude-science.
+auth_dir = 'D:/project/aster-science/claude-science-data/auth'
+# Package toolchain root: micromamba binary, pkgs cache, envs,
+# pip/npm caches. Default would be %USERPROFILE%\.claude-science\conda.
+conda_home = 'D:/project/aster-science/claude-science-data/conda'
+# Default is /tmp/operon-venvs.
+venvs_base = 'D:/project/aster-science/claude-science-data/venvs'
