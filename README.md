@@ -80,6 +80,15 @@ invoked from any shell or a shortcut.
 5. prompts for the OpenAI-compatible base URL, API key, model and optional model
    map, and writes them to `env.local.cmd`.
 
+Prompts can be skipped for scripted installs:
+
+```bat
+install.cmd <base_url> <api_key> [model] [model_map_json]
+install.cmd https://api.openai.com/v1 sk-... gpt-4o
+```
+
+Omitted arguments still prompt; an omitted model defaults to `gpt-4o`.
+
 Nothing is patched twice: step 3/4 are skipped when `bin\aster-science.exe`
 already exists. Delete `bin\aster-science.exe` and re-run `install.cmd` to
 rebuild it from the upstream binary.

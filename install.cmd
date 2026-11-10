@@ -1,6 +1,12 @@
 @echo off
 rem Installer: create the local instance, patch the upstream binary, and write
 rem the (never committed) environment file used by the launcher and proxy.
+rem
+rem Usage:
+rem   install.cmd
+rem   install.cmd <base_url> <api_key> [model] [model_map_json]
+rem
+rem Arguments skip the corresponding prompts, so the installer can be scripted.
 setlocal EnableExtensions
 cd /d "%~dp0"
 
@@ -24,20 +30,21 @@ if not exist "bin\aster-science.exe" (
   if exist "assets\aster.ico" node "tools\patch-icon.mjs" "bin\aster-science.exe" "assets" || exit /b 1
 )
 
-set "BASE="
-set "KEY="
-set "MODEL="
-set "MAP="
-set /p "BASE=OpenAI-compatible base URL [https://api.openai.com/v1]: "
+set "BASE=%~1"
+set "KEY=%~2"
+set "MODEL=%~3"
+set "MAP=%~4"
+
+if "%BASE%"=="" set /p "BASE=OpenAI-compatible base URL [https://api.openai.com/v1]: "
 if "%BASE%"=="" set "BASE=https://api.openai.com/v1"
-set /p "KEY=API key: "
+if "%KEY%"=="" set /p "KEY=API key: "
 if "%KEY%"=="" (
   echo [install] An API key is required.
   exit /b 1
 )
-set /p "MODEL=Upstream model [gpt-4o]: "
+if "%MODEL%"=="" set /p "MODEL=Upstream model [gpt-4o]: "
 if "%MODEL%"=="" set "MODEL=gpt-4o"
-set /p "MAP=Model map JSON (optional; leave empty for default aliases): "
+if "%MAP%"=="" set /p "MAP=Model map JSON (optional; leave empty for default aliases): "
 
 > "env.local.cmd" echo @echo off
 >> "env.local.cmd" echo set "ASTER_OPENAI_BASE_URL=%BASE%"
