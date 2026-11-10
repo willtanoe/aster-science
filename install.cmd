@@ -17,6 +17,7 @@ if not exist "aster-science.exe" (
   )
   echo [install] Patching Claude-Science-0.1.72.exe -^> aster-science.exe
   node "tools\patch-aster-science.mjs" "Claude-Science-0.1.72.exe" "aster-science.exe" || exit /b 1
+  if exist "assets\aster.ico" node "tools\patch-icon.mjs" "aster-science.exe" "assets" || exit /b 1
 )
 
 set "BASE="

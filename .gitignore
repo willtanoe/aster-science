@@ -17,3 +17,4 @@ node_modules/
 # Working copies of the logo; the committed copies live in assets/.
 /aster.png
 /aster.ico
+/aster.svg

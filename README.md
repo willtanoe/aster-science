@@ -63,21 +63,42 @@ Values live in `env.local.cmd`, which is gitignored.
 
 ## What the binary patch does
 
-`tools/patch-aster-science.mjs` performs exactly three same-length edits in the
-embedded JS bundle of the release build:
+`tools/patch-aster-science.mjs` performs byte-for-byte (same-length) edits in
+the embedded JS bundle of the release build:
 
-1. **Build gate** — `if(!t)` in the Anthropic client gate becomes `if(0 )`,
-   so a BYOK key is accepted without an OAuth token.
-2. **Web-UI gate** — the `/api/auth/status` early return when no OAuth token
-   exists reports `authenticated:!0` instead of `!1`, so the UI does not force
-   the Claude sign-in screen. Account/subscription fields stay `null`.
-3. **Credential resolver** — the terminal
-   `throw Error("No credentials available …")` in
-   `CredentialResolver.resolve()` becomes
-   `return{api_key:process.env.ANTHROPIC_API_KEY||"sk-ant-aster",auth_token:null}`.
+- **Display brand** — `Claude Science` becomes `Aster  Science` (two spaces
+  keep the length; HTML/JSX collapse them, so the rendered brand is
+  "Aster Science").
+- **CLI name** — the known-basename comparison misses and the `mt` fallback
+  returns `aster-science`, so `--version`, `--help` and the console prefix use
+  the new name.
+- **Build gate** — `if(!t)` in the Anthropic client gate becomes `if(0 )`,
+  so a BYOK key is accepted without an OAuth token.
+- **Web-UI gate** — the `/api/auth/status` early return when no OAuth token
+  exists reports `authenticated:!0` instead of `!1`, so the UI does not force
+  the Claude sign-in screen. Account/subscription fields stay `null`.
+- **Credential resolver** — the terminal
+  `throw Error("No credentials available …")` in
+  `CredentialResolver.resolve()` becomes
+  `return{api_key:process.env.ANTHROPIC_API_KEY||"sk-ant-aster",auth_token:null}`.
 
 The patcher refuses to write when a pattern is missing or not unique, and
 prints file offsets plus the output SHA-256.
+
+## Icon
+
+`assets/aster.svg` is rasterized to seven PNGs (`assets/icon-{16,24,32,48,64,128,256}.png`)
+and packed into `assets/aster.ico` by `tools/build-ico.mjs`. Each PNG is an
+indexed-color encode that fits the original icon slot in the PE resource
+section; `tools/patch-icon.mjs` overwrites the seven `RT_ICON` payloads in
+place, updates the data-entry sizes and the `RT_GROUP_ICON` `dwBytesInRes`,
+and never resizes or shifts the resource section.
+
+Internal identifiers are intentionally unchanged: `claude-science-data` (the
+`--here` folder name), `.claude-science` defaults, OAuth/update URLs and
+package names stay as upstream so paths, `--here` detection, stop-guard and
+update plumbing keep working. Some secondary display strings (the sandbox
+subsystem's `[claude-science]` prefix, prose mentioning "Claude") remain.
 
 ## Translation proxy
 
@@ -105,13 +126,17 @@ Known limits:
 ## Layout
 
 ```
-aster-science.cmd      launcher (proxy + daemon)
-stop.cmd               stop daemon + proxy
-install.cmd            patch binary, write env.local.cmd
-config.toml            instance paths (data dir, conda home, auth, venvs)
-proxy/aster-proxy.mjs  Anthropic → OpenAI translator
-proxy/run-proxy.cmd    proxy console wrapper
-tools/patch-aster-science.mjs
-assets/aster.png       logo
-assets/aster.ico
+aster-science.cmd          launcher (proxy + daemon)
+stop.cmd                   stop daemon + proxy
+install.cmd                patch binary + icon, write env.local.cmd
+config.toml                instance paths (data dir, conda home, auth, venvs)
+proxy/aster-proxy.mjs      Anthropic → OpenAI translator
+proxy/run-proxy.cmd        proxy console wrapper
+tools/patch-aster-science.mjs   JS bundle patches (brand, BYOK, auth, resolver)
+tools/patch-icon.mjs            in-place RT_ICON/RT_GROUP_ICON replacement
+tools/build-ico.mjs             packs the seven PNGs into assets/aster.ico
+assets/aster.svg           logo source
+assets/icon-*.png          seven rasterized sizes (indexed PNG)
+assets/aster.ico           multi-size ICO
+assets/aster.png           logo raster
 ```
