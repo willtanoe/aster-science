@@ -32,7 +32,7 @@ if "%KEY%"=="" (
 )
 set /p "MODEL=Upstream model [gpt-4o]: "
 if "%MODEL%"=="" set "MODEL=gpt-4o"
-set /p "MAP=Model map JSON, e.g. {\"claude-opus-5\":\"gpt-4o\"} [leave empty for defaults]: "
+set /p "MAP=Model map JSON (optional; leave empty for default aliases): "
 
 > "env.local.cmd" echo @echo off
 >> "env.local.cmd" echo set "ASTER_OPENAI_BASE_URL=%BASE%"
