@@ -6,6 +6,15 @@ cd /d "%~dp0"
 
 if exist "env.local.cmd" call "env.local.cmd"
 
+if not exist "config.toml" (
+  where node >nul 2>&1
+  if errorlevel 1 (
+    echo [aster-science] Node.js 18+ is required ^(node not found on PATH^).
+    exit /b 1
+  )
+  node "%~dp0tools\make-config.mjs" || exit /b 1
+)
+
 if not defined ASTER_PROXY_PORT set "ASTER_PROXY_PORT=8787"
 if not defined ASTER_PROXY_HOST set "ASTER_PROXY_HOST=127.0.0.1"
 set "PROXY_URL=http://%ASTER_PROXY_HOST%:%ASTER_PROXY_PORT%"
@@ -22,4 +31,4 @@ if errorlevel 1 (
 set "ANTHROPIC_BASE_URL=%PROXY_URL%"
 set "ANTHROPIC_API_KEY=sk-ant-aster"
 
-"%~dp0aster-science.exe" %* --config "%~dp0config.toml" --here
+"%~dp0bin\aster-science.exe" %* --config "%~dp0config.toml" --here

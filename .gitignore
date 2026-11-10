@@ -1,4 +1,5 @@
 # Binaries are produced by tools/patch-aster-science.mjs; never commit them.
+bin/
 *.exe
 *.dll
 
@@ -9,12 +10,10 @@ claude-science-data/
 env.local.cmd
 .env
 
+# Generated per-machine instance config (tools/make-config.mjs).
+/config.toml
+
 # Scratch.
 .work/
 node_modules/
 *.log
-
-# Working copies of the logo; the committed copies live in assets/.
-/aster.png
-/aster.ico
-/aster.svg

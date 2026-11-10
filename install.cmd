@@ -10,14 +10,18 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist "aster-science.exe" (
-  if not exist "Claude-Science-0.1.72.exe" (
-    echo [install] Put Claude-Science-0.1.72.exe in this folder, then run install again.
+if not exist "config.toml" node "tools\make-config.mjs" || exit /b 1
+
+if not exist "bin" mkdir "bin" >nul 2>&1
+
+if not exist "bin\aster-science.exe" (
+  if not exist "bin\Claude-Science-0.1.72.exe" (
+    echo [install] Put Claude-Science-0.1.72.exe in bin\, then run install again.
     exit /b 1
   )
-  echo [install] Patching Claude-Science-0.1.72.exe -^> aster-science.exe
-  node "tools\patch-aster-science.mjs" "Claude-Science-0.1.72.exe" "aster-science.exe" || exit /b 1
-  if exist "assets\aster.ico" node "tools\patch-icon.mjs" "aster-science.exe" "assets" || exit /b 1
+  echo [install] Patching bin\Claude-Science-0.1.72.exe -^> bin\aster-science.exe
+  node "tools\patch-aster-science.mjs" "bin\Claude-Science-0.1.72.exe" "bin\aster-science.exe" || exit /b 1
+  if exist "assets\aster.ico" node "tools\patch-icon.mjs" "bin\aster-science.exe" "assets" || exit /b 1
 )
 
 set "BASE="
