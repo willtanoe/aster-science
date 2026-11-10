@@ -4,7 +4,10 @@ rem the (never committed) environment file used by the launcher and proxy.
 rem
 rem Usage:
 rem   install.cmd
-rem   install.cmd <base_url> <api_key> [model] [model_map_json]
+rem   install.cmd <base_url> <api_key> [model] [model_map]
+rem
+rem model_map is inline JSON or @path\to\map.json. Inline JSON quoting is
+rem shell-dependent; prefer @file for scripted installs.
 rem
 rem Arguments skip the corresponding prompts, so the installer can be scripted.
 setlocal EnableExtensions
@@ -46,11 +49,11 @@ if "%MODEL%"=="" set /p "MODEL=Upstream model [gpt-4o]: "
 if "%MODEL%"=="" set "MODEL=gpt-4o"
 if "%MAP%"=="" set /p "MAP=Model map JSON (optional; leave empty for default aliases): "
 
-> "env.local.cmd" echo @echo off
->> "env.local.cmd" echo set "ASTER_OPENAI_BASE_URL=%BASE%"
->> "env.local.cmd" echo set "ASTER_OPENAI_API_KEY=%KEY%"
->> "env.local.cmd" echo set "ASTER_OPENAI_MODEL=%MODEL%"
-if not "%MAP%"=="" >> "env.local.cmd" echo set "ASTER_MODEL_MAP=%MAP%"
+set "ASTER_ENV_BASE=%BASE%"
+set "ASTER_ENV_KEY=%KEY%"
+set "ASTER_ENV_MODEL=%MODEL%"
+set "ASTER_ENV_MAP=%MAP%"
+node "tools\write-env.mjs" || exit /b 1
 
 if not exist "claude-science-data\logs" mkdir "claude-science-data\logs" >nul 2>&1
 
