@@ -5,12 +5,22 @@
 // No third-party dependencies. Node >= 18 (global fetch).
 //
 // Environment (installer-provided; never committed):
-//   ASTER_OPENAI_BASE_URL   default https://api.openai.com/v1
-//   ASTER_OPENAI_API_KEY    required
-//   ASTER_OPENAI_MODEL      upstream model for unmapped aliases, default gpt-4o
-//   ASTER_MODEL_MAP         JSON object { "<anthropic id>": "<upstream model>" }
+//   ASTER_OPENAI_BASE_URL   default upstream base URL
+//   ASTER_OPENAI_API_KEY    default upstream key
+//   ASTER_OPENAI_MODEL      model for aliases without an explicit route
+//   ASTER_MODEL_MAP         JSON { "<alias>": "<model>" | {"model","base_url?","api_key?"} }
 //   ASTER_PROXY_PORT        default 8787
 //   ASTER_PROXY_HOST        default 127.0.0.1
+//
+// Model routing:
+//   - The app always asks for an alias (claude-opus-5, claude-sonnet-4-6, …).
+//   - Each alias resolves to a route: {model, base, apiKey}.
+//   - A map entry as a string reuses the default base/key.
+//   - A map entry as an object can point at another endpoint/key.
+//   - Aliases missing from the map fall back to ASTER_OPENAI_MODEL on the
+//     default base/key, even if they are not advertised by /v1/models.
+//   - If the map is non-empty, its keys are the advertised aliases; otherwise
+//     the three defaults are advertised.
 
 import http from 'node:http';
 
@@ -20,18 +30,44 @@ const BASE = (process.env.ASTER_OPENAI_BASE_URL || 'https://api.openai.com/v1').
 const UPSTREAM_KEY = process.env.ASTER_OPENAI_API_KEY || '';
 const DEFAULT_MODEL = process.env.ASTER_OPENAI_MODEL || 'gpt-4o';
 
+const DEFAULT_ALIASES = ['claude-opus-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+const DEFAULT_ROUTE = Object.freeze({ model: DEFAULT_MODEL, base: BASE, apiKey: UPSTREAM_KEY });
+
 let MODEL_MAP = {};
 try {
   if (process.env.ASTER_MODEL_MAP) MODEL_MAP = JSON.parse(process.env.ASTER_MODEL_MAP);
 } catch (e) {
-  console.error('[aster-proxy] ASTER_MODEL_MAP is not valid JSON:', e.message);
+  console.error('[aster-proxy] ASTER_MODEL_MAP is not valid JSON; ignoring it:', e.message);
+  MODEL_MAP = {};
 }
 
-const ALIASES = Object.keys(MODEL_MAP).length
-  ? Object.keys(MODEL_MAP)
-  : ['claude-opus-5', 'claude-sonnet-4-6', 'claude-haiku-4-5'];
+const ROUTES = new Map();
+for (const [alias, value] of Object.entries(MODEL_MAP)) {
+  if (typeof value === 'string' && value.trim()) {
+    ROUTES.set(alias, { model: value.trim(), base: BASE, apiKey: UPSTREAM_KEY });
+    continue;
+  }
+  if (value && typeof value === 'object' && typeof value.model === 'string' && value.model.trim()) {
+    const base = typeof value.base_url === 'string' && value.base_url.trim() ? value.base_url.trim() : BASE;
+    try {
+      new URL(base);
+    } catch {
+      console.error(`[aster-proxy] ASTER_MODEL_MAP["${alias}"].base_url is not a valid URL; entry ignored`);
+      continue;
+    }
+    ROUTES.set(alias, {
+      model: value.model.trim(),
+      base: base.replace(/\/+$/, ''),
+      apiKey: typeof value.api_key === 'string' && value.api_key ? value.api_key : UPSTREAM_KEY,
+    });
+    continue;
+  }
+  console.error(`[aster-proxy] ASTER_MODEL_MAP["${alias}"] must be a model id or {model, base_url?, api_key?}; entry ignored`);
+}
 
-const upstreamFor = (model) => MODEL_MAP[model] || DEFAULT_MODEL;
+const ALIASES = ROUTES.size ? [...ROUTES.keys()] : DEFAULT_ALIASES;
+const routeFor = (alias) => ROUTES.get(alias) ?? DEFAULT_ROUTE;
+const routeLabel = (route) => `${route.model} @ ${new URL(route.base).host}`;
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
@@ -159,9 +195,9 @@ function toOpenAIToolChoice(choice) {
   }
 }
 
-function buildUpstreamRequest(body) {
+function buildUpstreamRequest(body, route) {
   const req = {
-    model: upstreamFor(body.model),
+    model: route.model,
     messages: toOpenAIMessages(body),
     max_tokens: body.max_tokens ?? 4096,
     stream: Boolean(body.stream),
@@ -405,18 +441,31 @@ const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === 'GET' && path === '/health') {
-      return json(res, 200, { ok: true, upstream: BASE, models: ALIASES, default_model: DEFAULT_MODEL });
+      return json(res, 200, {
+        ok: true,
+        upstream: BASE,
+        default_model: DEFAULT_MODEL,
+        models: ALIASES,
+        routes: ALIASES.map((alias) => {
+          const route = routeFor(alias);
+          return { alias, model: route.model, base: route.base, has_key: Boolean(route.apiKey) };
+        }),
+        fallback: { model: DEFAULT_MODEL, base: BASE, has_key: Boolean(UPSTREAM_KEY) },
+      });
     }
 
     if (req.method === 'GET' && path === '/v1/models') {
       return json(res, 200, {
-        data: ALIASES.map((id, i) => ({
-          type: 'model',
-          id,
-          display_name: `${id} → ${upstreamFor(id)}`,
-          created_at: '2025-01-01T00:00:00Z',
-          ...(i === 0 ? {} : {}),
-        })),
+        data: ALIASES.map((id) => {
+          const route = routeFor(id);
+          const host = new URL(route.base).host;
+          return {
+            type: 'model',
+            id,
+            display_name: `${id} → ${route.model} @ ${host}`,
+            created_at: '2025-01-01T00:00:00Z',
+          };
+        }),
         has_more: false,
         first_id: ALIASES[0] ?? null,
         last_id: ALIASES[ALIASES.length - 1] ?? null,
@@ -431,9 +480,15 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && path === '/v1/messages') {
       const body = JSON.parse((await readBody(req)) || '{}');
-      if (!UPSTREAM_KEY) return error(res, 500, 'authentication_error', 'ASTER_OPENAI_API_KEY is not set');
-      const upstreamReq = buildUpstreamRequest(body);
-      const upstreamUrl = `${BASE}/chat/completions`;
+      const route = routeFor(body.model);
+      if (!route.apiKey) {
+        const hint = route === DEFAULT_ROUTE
+          ? 'set ASTER_OPENAI_API_KEY'
+          : `set ASTER_MODEL_MAP["${body.model}"].api_key`;
+        return error(res, 500, 'authentication_error', `no upstream API key for ${body.model} (${hint})`);
+      }
+      const upstreamReq = buildUpstreamRequest(body, route);
+      const upstreamUrl = `${route.base}/chat/completions`;
       const startedAt = Date.now();
 
       let upstream;
@@ -442,7 +497,7 @@ const server = http.createServer(async (req, res) => {
           method: 'POST',
           headers: {
             'content-type': 'application/json',
-            authorization: `Bearer ${UPSTREAM_KEY}`,
+            authorization: `Bearer ${route.apiKey}`,
           },
           body: JSON.stringify(upstreamReq),
         });
@@ -453,13 +508,13 @@ const server = http.createServer(async (req, res) => {
 
       if (!upstream.ok) {
         const text = await upstream.text();
-        log('upstream error', upstream.status, text.slice(0, 500));
+        log('upstream error', body.model, '→', routeLabel(route), upstream.status, text.slice(0, 500));
         return error(res, upstream.status, 'api_error', text.slice(0, 4000));
       }
 
       if (!body.stream) {
         const data = await upstream.json();
-        log('chat', upstreamReq.model, 'ms=', Date.now() - startedAt);
+        log('chat', body.model, '→', routeLabel(route), 'ms=', Date.now() - startedAt);
         return json(res, 200, toAnthropicResponse(data, body.model));
       }
 
@@ -487,7 +542,7 @@ const server = http.createServer(async (req, res) => {
           stream.chunk(obj);
         }
         stream.finish();
-        log('chat stream', upstreamReq.model, 'ms=', Date.now() - startedAt);
+        log('chat stream', body.model, '→', routeLabel(route), 'ms=', Date.now() - startedAt);
       } catch (e) {
         log('stream failed', e.message);
         try {
@@ -508,6 +563,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  log(`listening on ${HOST}:${PORT} → ${BASE}`);
-  log(`aliases: ${ALIASES.map((a) => `${a}=${upstreamFor(a)}`).join(', ')}`);
+  log(`listening on ${HOST}:${PORT} → default ${DEFAULT_MODEL} @ ${new URL(BASE).host}`);
+  log(`aliases: ${ALIASES.map((a) => `${a} → ${routeLabel(routeFor(a))}`).join(', ')}`);
 });
