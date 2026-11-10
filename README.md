@@ -83,11 +83,24 @@ invoked from any shell or a shortcut.
 Prompts can be skipped for scripted installs:
 
 ```bat
-install.cmd <base_url> <api_key> [model] [model_map_json]
+install.cmd <base_url> <api_key> [model] [model_map]
 install.cmd https://api.openai.com/v1 sk-... gpt-4o
+install.cmd https://api.openai.com/v1 sk-... gpt-4o @map.json
 ```
 
-Omitted arguments still prompt; an omitted model defaults to `gpt-4o`.
+`model_map` is inline JSON or `@path\to\map.json`. Inline JSON is fragile when
+an argument passes through another shell's quoting; `@file` is the reliable form
+and is validated before anything is written:
+
+```json
+{
+  "claude-opus-5": "gpt-4o",
+  "claude-sonnet-4-6": { "model": "deepseek-chat", "base_url": "https://api.deepseek.com/v1", "api_key": "sk-..." }
+}
+```
+
+Omitted arguments still prompt; an omitted model defaults to `gpt-4o`. The
+interactive prompt accepts pasted JSON directly.
 
 Nothing is patched twice: step 3/4 are skipped when `bin\aster-science.exe`
 already exists. Delete `bin\aster-science.exe` and re-run `install.cmd` to
@@ -120,7 +133,7 @@ A commented template lives in `env.local.cmd.example` — copy it to
 | `ASTER_OPENAI_BASE_URL` | `https://api.openai.com/v1` | Upstream base URL; `/chat/completions` and `/models` are appended |
 | `ASTER_OPENAI_API_KEY` | — (required) | Upstream key; sent as `Authorization: Bearer …` |
 | `ASTER_OPENAI_MODEL` | `gpt-4o` | Upstream model used for aliases without an explicit mapping |
-| `ASTER_MODEL_MAP` | — | JSON object mapping app model ids to upstream model ids |
+| `ASTER_MODEL_MAP` | — | JSON route map: `{"<alias>":"<model>"}` or `{"<alias>":{"model","base_url?","api_key?"}}`. Non-empty keys become the advertised aliases |
 | `ASTER_PROXY_PORT` | `8787` | Local proxy port |
 | `ASTER_PROXY_HOST` | `127.0.0.1` | Local proxy bind address |
 
@@ -143,6 +156,115 @@ ANTHROPIC_API_KEY=sk-ant-aster        (placeholder; the proxy ignores it)
 
 The placeholder exists because the patched credential resolver returns
 `process.env.ANTHROPIC_API_KEY`; any non-empty value is enough.
+
+### Model routing (aliases → routes)
+
+The app never sends an upstream model name. It sends an **alias** such as
+`claude-opus-5`. The proxy resolves each alias to a **route**:
+
+```
+route = { model: <upstream model id>, base: <upstream base URL>, apiKey: <upstream key> }
+```
+
+Default aliases (used when `ASTER_MODEL_MAP` is unset):
+`claude-opus-5`, `claude-sonnet-4-6`, `claude-haiku-4-5`.
+
+Resolution order, exactly:
+
+1. **Alias has a string entry** — `"claude-opus-5": "gpt-4o"` → model `gpt-4o`
+   on `ASTER_OPENAI_BASE_URL` with `ASTER_OPENAI_API_KEY`.
+2. **Alias has an object entry** —
+   `"claude-sonnet-4-6": {"model":"deepseek-chat","base_url":"https://api.deepseek.com/v1","api_key":"sk-…"}`
+   → that model on that base URL with that key. `base_url` and `api_key` are
+   optional and fall back to the default values.
+3. **Alias has no entry** — fallback to `ASTER_OPENAI_MODEL` on
+   `ASTER_OPENAI_BASE_URL` with `ASTER_OPENAI_API_KEY`. This applies even when
+   the alias is not advertised by `/v1/models`, so internal calls for
+   `claude-sonnet-4-6` still work with a one-entry map.
+
+Advertised aliases: if `ASTER_MODEL_MAP` has at least one valid entry, its keys
+are exactly what `/v1/models` exposes (that is the model picker in the UI).
+Otherwise the three defaults are exposed.
+
+Invalid entries are reported on the proxy log and ignored; invalid JSON is
+ignored as a whole. Alias keys are case-sensitive.
+
+#### Scenario A — one upstream model for all aliases
+
+```bat
+set "ASTER_OPENAI_BASE_URL=https://api.openai.com/v1"
+set "ASTER_OPENAI_API_KEY=sk-..."
+set "ASTER_OPENAI_MODEL=gpt-4o"
+:: no ASTER_MODEL_MAP
+```
+
+| Alias requested | Upstream model | Endpoint |
+|---|---|---|
+| `claude-opus-5` | `gpt-4o` | default |
+| `claude-sonnet-4-6` | `gpt-4o` | default |
+| `claude-haiku-4-5` | `gpt-4o` | default |
+| anything else | `gpt-4o` | default |
+
+#### Scenario B — three aliases, three models, one endpoint
+
+```bat
+set "ASTER_MODEL_MAP={"claude-opus-5":"gpt-4o","claude-sonnet-4-6":"gpt-4o-mini","claude-haiku-4-5":"o4-mini"}"
+```
+
+| Alias requested | Upstream model | Endpoint |
+|---|---|---|
+| `claude-opus-5` | `gpt-4o` | default |
+| `claude-sonnet-4-6` | `gpt-4o-mini` | default |
+| `claude-haiku-4-5` | `o4-mini` | default |
+
+#### Scenario C — three aliases across different providers
+
+```bat
+set "ASTER_MODEL_MAP={"claude-opus-5":"gpt-4o","claude-sonnet-4-6":{"model":"deepseek-chat","base_url":"https://api.deepseek.com/v1","api_key":"sk-deepseek"},"claude-haiku-4-5":{"model":"qwen-plus","base_url":"https://dashscope.aliyuncs.com/compatible-mode/v1","api_key":"sk-qwen"}}"
+```
+
+| Alias requested | Upstream model | Endpoint | Key |
+|---|---|---|---|
+| `claude-opus-5` | `gpt-4o` | default | default |
+| `claude-sonnet-4-6` | `deepseek-chat` | `api.deepseek.com` | `sk-deepseek` |
+| `claude-haiku-4-5` | `qwen-plus` | `dashscope.aliyuncs.com` | `sk-qwen` |
+| anything else | `ASTER_OPENAI_MODEL` | default | default |
+
+Each chat is logged with the resolution, for example
+`chat claude-sonnet-4-6 → deepseek-chat @ api.deepseek.com`.
+
+#### Scenario D — partial map
+
+```bat
+set "ASTER_MODEL_MAP={"claude-opus-5":"gpt-4o"}"
+```
+
+Only `claude-opus-5` is advertised. If the app requests
+`claude-sonnet-4-6` internally, it resolves through the fallback
+(`ASTER_OPENAI_MODEL` on the default endpoint) and still succeeds.
+
+#### Choosing the alias
+
+The model picker in the UI lists `/v1/models`, so it shows exactly the
+advertised aliases. Picking one routes as described. The daemon's default
+model and any sub-agent model choices are also aliases; unmapped ones take the
+fallback route.
+
+#### Verifying routes
+
+```bat
+curl http://127.0.0.1:8787/health
+:: routes: [{alias, model, base, has_key}, ...], fallback: {...}
+
+curl http://127.0.0.1:8787/v1/models
+:: display_name: "claude-sonnet-4-6 → deepseek-chat @ api.deepseek.com"
+
+curl -s -X POST http://127.0.0.1:8787/v1/messages ^
+  -H "content-type: application/json" ^
+  -d "{\"model\":\"claude-sonnet-4-6\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"
+```
+
+The proxy log shows the alias, resolved model and host for every request.
 
 ---
 
@@ -290,13 +412,21 @@ dependencies. It is started on demand by the launcher and writes its console to
 
 | Endpoint | Behaviour |
 |---|---|
-| `GET /health` | `{ok, upstream, models, default_model}`; used by the launcher |
-| `GET /v1/models` | Serves the configured aliases, so the app keeps its model-specific behaviour |
-| `POST /v1/messages` | Anthropic Messages → OpenAI Chat Completions (streaming and non-streaming) |
+| `GET /health` | `{ok, upstream, default_model, models, routes, fallback}`; `routes` lists `{alias, model, base, has_key}` per advertised alias. Used by the launcher |
+| `GET /v1/models` | Serves the advertised aliases with `display_name` = `alias → model @ host` |
+| `POST /v1/messages` | Anthropic Messages → OpenAI Chat Completions (streaming and non-streaming); resolves the requested alias to its route |
 | `POST /v1/messages/count_tokens` | Character-based estimate (`len/4`) |
 
 Default aliases: `claude-opus-5`, `claude-sonnet-4-6`, `claude-haiku-4-5`.
-Override with `ASTER_MODEL_MAP`; unmapped aliases use `ASTER_OPENAI_MODEL`.
+`ASTER_MODEL_MAP` overrides individual aliases and defines the advertised set
+(see “Model routing” above). Aliases without an entry use
+`ASTER_OPENAI_MODEL` on the default endpoint.
+
+Startup log prints every alias with its resolved route:
+
+```
+aliases: claude-opus-5 → gpt-4o @ api.openai.com, claude-sonnet-4-6 → deepseek-chat @ api.deepseek.com, claude-haiku-4-5 → qwen-plus @ dashscope.aliyuncs.com
+```
 
 ### Translation coverage
 
@@ -320,6 +450,10 @@ Override with `ASTER_MODEL_MAP`; unmapped aliases use `ASTER_OPENAI_MODEL`.
 - prompt-cache counters are reported as zero;
 - only the first upstream choice is used;
 - `count_tokens` is an estimate, not the upstream tokenizer;
+- alias keys are case-sensitive; a map entry that is neither a non-empty string
+  nor an object with a `model` string is ignored with a startup warning;
+- if `ASTER_MODEL_MAP` is non-empty, unmapped default aliases are no longer
+  advertised (they still resolve through the fallback route);
 - the proxy does not validate the incoming placeholder key and binds to
   `127.0.0.1` by default — do not change `ASTER_PROXY_HOST` to a public
   interface without putting authentication in front of it.
@@ -341,6 +475,7 @@ claude-science-data/           DB, conda, electron, skills, logs (gitignored)
 proxy/aster-proxy.mjs          Anthropic → OpenAI translator
 proxy/run-proxy.cmd            proxy console wrapper (logs to file)
 tools/make-config.mjs          writes absolute config.toml
+tools/write-env.mjs            writes/validates env.local.cmd (map file support)
 tools/patch-aster-science.mjs  JS bundle patches
 tools/patch-icon.mjs           in-place PE icon replacement
 tools/build-ico.mjs            packs PNGs into assets/aster.ico
