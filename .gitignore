@@ -1,0 +1,19 @@
+# Binaries are produced by tools/patch-aster-science.mjs; never commit them.
+*.exe
+*.dll
+
+# Local instance state (data dir, conda envs, electron engine, logs).
+claude-science-data/
+
+# Installer-provided secrets.
+env.local.cmd
+.env
+
+# Scratch.
+.work/
+node_modules/
+*.log
+
+# Working copies of the logo; the committed copies live in assets/.
+/aster.png
+/aster.ico
