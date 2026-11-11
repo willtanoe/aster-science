@@ -4,7 +4,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 if [ -x bin/claude-science ] && [ -f config.toml ]; then
-  bin/claude-science stop --config "$PWD/config.toml" --here || true
+  bin/claude-science stop --config "$PWD/config.toml" --data-dir "$PWD/claude-science-data" || true
 fi
 
 PID_FILE="$PWD/claude-science-data/aster-proxy.pid"

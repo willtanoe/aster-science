@@ -6,7 +6,9 @@
 # The launcher always runs from its own directory, sources env.local.sh, makes
 # sure the proxy is answering, then hands the command to the patched daemon.
 set -euo pipefail
-cd "$(dirname "$0")"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+DATA="$ROOT/claude-science-data"
 
 if [ -f env.local.sh ]; then
   # shellcheck disable=SC1091
@@ -21,11 +23,11 @@ if [ ! -f config.toml ]; then
   node tools/make-config.mjs
 fi
 
-mkdir -p claude-science-data/logs
+mkdir -p "$DATA/logs"
 
 if ! curl -fsS --max-time 1 "$PROXY_URL/health" >/dev/null 2>&1; then
-  nohup node "$PWD/proxy/aster-proxy.mjs" >>"$PWD/claude-science-data/logs/aster-proxy.log" 2>&1 &
-  echo $! >"$PWD/claude-science-data/aster-proxy.pid"
+  nohup node "$ROOT/proxy/aster-proxy.mjs" >>"$DATA/logs/aster-proxy.log" 2>&1 &
+  echo $! >"$DATA/aster-proxy.pid"
   for _ in $(seq 1 40); do
     curl -fsS --max-time 1 "$PROXY_URL/health" >/dev/null 2>&1 && break
     sleep 0.25
@@ -43,11 +45,15 @@ export ANTHROPIC_API_KEY="sk-ant-aster"
 # The rebrand tool exits immediately when the tree is already branded and
 # waits for extraction otherwise. It is version-agnostic.
 if [ "${1:-}" = "serve" ]; then
-  nohup node "$PWD/tools/rebrand-web-dist.mjs" --watch --timeout 180 --quiet \
-    >>"$PWD/claude-science-data/logs/rebrand.log" 2>&1 &
+  nohup node "$ROOT/tools/rebrand-web-dist.mjs" --watch --timeout 180 --quiet \
+    >>"$DATA/logs/rebrand.log" 2>&1 &
 fi
 
+# The package-install sandbox only re-allows reads under the data dirs; a
+# daemon whose cwd is the repo root makes micromamba's getcwd() fail with
+# EPERM. Run it from / and pin the instance with --data-dir instead of --here.
+cd /
 if [ "${1:-}" = "serve" ]; then
-  exec "$PWD/bin/claude-science" "$@" --config "$PWD/config.toml" --here --no-auto-update
+  exec "$ROOT/bin/claude-science" "$@" --config "$ROOT/config.toml" --data-dir "$DATA" --no-auto-update
 fi
-exec "$PWD/bin/claude-science" "$@" --config "$PWD/config.toml" --here
+exec "$ROOT/bin/claude-science" "$@" --config "$ROOT/config.toml" --data-dir "$DATA"

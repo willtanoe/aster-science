@@ -280,8 +280,16 @@ venvs_base = '<repo>/claude-science-data/venvs'
 | `conda_home` | micromamba binary, package cache, conda envs, pip/npm caches |
 | `venvs_base` | Path-based Python venvs |
 
-The launcher always passes `--here`, which makes `<cwd>/claude-science-data` the
-instance data dir and keeps it separate from the global `~/.claude-science`.
+The launcher pins the instance with `--data-dir <repo>/claude-science-data`
+(and `--config`) and starts the daemon with its working directory at `/`.
+
+The working directory matters on macOS: package installs run inside a seatbelt
+profile that denies reads under your home directory and re-allows only the
+data-dir trees. A daemon whose cwd is the repo root makes `micromamba` fail with
+`call to getcwd failed: Operation not permitted`, because only metadata reads
+are allowed for that path. Starting the daemon at `/` keeps the sandbox's
+`getcwd()` working; `--data-dir` keeps every path absolute so nothing depends on
+the cwd.
 
 ### Moving the folder
 
@@ -292,8 +300,8 @@ node tools/make-config.mjs --force
 ./aster-science.sh serve
 ```
 
-The data folder keeps its name (`claude-science-data`) because `--here`
-registers instances by that name. Keep the folder under your home directory;
+The launcher passes the data dir explicitly, so the folder may be renamed as
+long as `config.toml` and the launcher agree. Keep it under your home directory;
 the macOS daemon refuses anything else.
 
 ---
@@ -505,6 +513,12 @@ after signing. Re-run `tools/patch-aster-science.mjs --force`; it re-signs.
 only accepts a data dir under `$HOME` and outside the system temp folder. Keep
 the checkout under your home directory.
 
+**`critical libmamba filesystem error: in current_path: call to getcwd failed:
+Operation not permitted`** — the daemon was started with a working directory the
+package-install sandbox cannot read. `aster-science.sh` starts it at `/` for
+exactly this reason; if you launch `bin/claude-science` by hand, `cd /` first
+and pass `--data-dir <repo>/claude-science-data --config <repo>/config.toml`.
+
 **`[daemon] WARNING: pidIsOperonDaemon(self) is false`** — the patched daemon
 was renamed. Keep the file named `bin/claude-science`; `stop` will otherwise
 refuse to signal it.
@@ -566,7 +580,7 @@ proves the app reached the proxy.
 These stay as upstream because other logic depends on them:
 
 - the `claude-science` binary basename (lockfile kill-guard),
-- `claude-science-data` (the `--here` folder name and the instance marker),
+- `claude-science-data` (the default folder name and the instance marker),
 - `.claude-science` default paths and `config.toml` fallback,
 - OAuth/update URLs, package names and the `claude-science.exe` pid-guard
   string,
