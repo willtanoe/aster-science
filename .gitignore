@@ -1,0 +1,15 @@
+# Upstream releases and patched binaries (never committed)
+bin/
+source/*.dmg
+source/*.app/
+
+# Per-machine state and secrets
+claude-science-data/
+config.toml
+env.local.sh
+
+# Generated launcher bundle
+Aster Science.app/
+
+.DS_Store
+*.log
