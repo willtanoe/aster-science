@@ -23,14 +23,17 @@ if not exist "config.toml" node "tools\make-config.mjs" || exit /b 1
 
 if not exist "bin" mkdir "bin" >nul 2>&1
 
-if not exist "bin\aster-science.exe" (
-  if not exist "bin\Claude-Science-0.1.72.exe" (
-    echo [install] Put Claude-Science-0.1.72.exe in bin\, then run install again.
-    exit /b 1
-  )
-  echo [install] Patching bin\Claude-Science-0.1.72.exe -^> bin\aster-science.exe
-  node "tools\patch-aster-science.mjs" "bin\Claude-Science-0.1.72.exe" "bin\aster-science.exe" || exit /b 1
+rem Patch the newest bin\Claude-Science-*.exe. The tool exits 10 when it wrote
+rem a new binary, 0 when the existing one is already current.
+node "tools\patch-aster-science.mjs"
+set "PATCH_RC=%errorlevel%"
+if "%PATCH_RC%"=="1" exit /b 1
+if "%PATCH_RC%"=="10" (
   if exist "assets\aster.ico" node "tools\patch-icon.mjs" "bin\aster-science.exe" "assets" || exit /b 1
+)
+if not exist "bin\aster-science.exe" (
+  echo [install] Put a Claude-Science-*.exe release in bin\, then run install again.
+  exit /b 1
 )
 
 set "BASE=%~1"

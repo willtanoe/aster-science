@@ -31,4 +31,11 @@ if errorlevel 1 (
 set "ANTHROPIC_BASE_URL=%PROXY_URL%"
 set "ANTHROPIC_API_KEY=sk-ant-aster"
 
+rem The daemon unpacks an unbranded web-dist on the first run of a version.
+rem The rebrand tool exits immediately when the tree already says "Aster
+rem Science", and waits for extraction otherwise. It is version-agnostic.
+if /i "%~1"=="serve" (
+  start "aster-rebrand" /min node "%~dp0tools\rebrand-web-dist.mjs" --watch --timeout 120 --quiet
+)
+
 "%~dp0bin\aster-science.exe" %* --config "%~dp0config.toml" --here

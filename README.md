@@ -1,6 +1,6 @@
 # aster-science
 
-A local, self-contained build of **Claude Science 0.1.72** that runs without a
+A local, self-contained build of **Claude Science** that runs without a
 Claude account and talks to any **OpenAI-compatible** `/chat/completions`
 endpoint.
 
@@ -24,7 +24,7 @@ Everything the app downloads or stores stays inside this folder
 |---|---|
 | Windows x64 | The upstream binary is a Windows PE32+ executable |
 | Node.js 18+ | Launcher, proxy and all patch tools; Node 24 tested |
-| `bin/Claude-Science-0.1.72.exe` | Upstream release, only needed for the first install |
+| `bin/Claude-Science-<version>.exe` | Upstream release; the installer picks the newest match in `bin/` |
 | PowerShell | Used by the launcher for the proxy health probe and by `stop.cmd` |
 
 The repository intentionally does **not** contain executables, runtime state or
@@ -36,7 +36,7 @@ credentials.
 
 ```bat
 :: 1. put the upstream release here:
-::    bin\Claude-Science-0.1.72.exe
+::    bin\Claude-Science-<version>.exe
 
 :: 2. patch the binary and record your endpoint
 install.cmd
@@ -73,8 +73,9 @@ invoked from any shell or a shortcut.
 1. checks that `node` is on `PATH`;
 2. creates `config.toml` with absolute paths for this machine
    (`tools/make-config.mjs`) if it does not exist;
-3. patches `bin\Claude-Science-0.1.72.exe` → `bin\aster-science.exe`
-   (`tools/patch-aster-science.mjs`);
+3. patches the newest `bin\Claude-Science-*.exe` → `bin\aster-science.exe`
+   (`tools/patch-aster-science.mjs`); an existing output is rebuilt only when
+   the upstream file is newer;
 4. replaces the seven `RT_ICON` resources in that executable
    (`tools/patch-icon.mjs`, using `assets/aster.ico`);
 5. prompts for the OpenAI-compatible base URL, API key, model and optional model
@@ -110,7 +111,7 @@ rebuild it from the upstream binary.
 
 ```bat
 node tools\make-config.mjs
-node tools\patch-aster-science.mjs bin\Claude-Science-0.1.72.exe bin\aster-science.exe
+node tools\patch-aster-science.mjs bin\Claude-Science-<version>.exe bin\aster-science.exe
 node tools\patch-icon.mjs bin\aster-science.exe assets
 node tools\build-ico.mjs
 ```
@@ -332,16 +333,21 @@ replaces, so no offset, table or embedded-module size changes.
 | `byok-gate` | `if(!t)throw new Lw("This build requires …")` | `if(0 )throw …` | Accepts a BYOK key without an OAuth token |
 | `status-authenticated` | `if(!c)return{authenticated:!1,…}` | `if(!c)return{authenticated:!0,…}` | UI does not force the Claude sign-in screen; account fields stay `null` |
 | `env-credential` | `throw Error("No credentials available …")` | `return{api_key:process.env.ANTHROPIC_API_KEY\|\|"sk-ant-aster",auth_token:null}` | `CredentialResolver.resolve()` falls back to the environment credential |
+| `brand-signin-logo` | inline `IFi` SVG (Claude mark) | compact Aster emblem, padded into the same slot | Sign-in/setup pages render it inline and derive their data-URI favicon from it |
 
 The tool refuses to write when a pattern is missing, appears more than once
 (for single-occurrence patches), or when a replacement would change the length.
 It prints every file offset and the output SHA-256.
 
+With no arguments it selects the newest `bin/Claude-Science-*.exe`, derives the
+version from the file name and skips the work when `bin/aster-science.exe` is
+already newer. Exit codes: `0` up to date, `10` patched, `1` failed.
+
 Verification:
 
 ```bat
 bin\aster-science.exe --version
-:: aster-science 0.1.72 (release, public)
+:: aster-science <version> (release, public)
 
 bin\aster-science.exe --help
 :: aster-science — run Claude on your data, locally, in your browser
@@ -349,10 +355,43 @@ bin\aster-science.exe --help
 
 ### Upstream version changes
 
-The patches are written against **0.1.72**. Another build will almost certainly
-have different minified text; the tool will fail with `expected … found 0` and
-must be re-derived against the new bundle. Do not force it by relaxing the
-checks without re-reading the new source.
+Nothing in the repository pins a release number. Drop a newer
+`bin\Claude-Science-*.exe` next to the old one and re-run `install.cmd`: the
+patcher picks the newest file, re-applies the icon, and the runtime assets are
+re-extracted under a new `runtime/<version>-release/` directory.
+
+Each patch is located by the text that carries it (the brand string, the gate
+message, the credential error, the status object), not by fixed byte offsets,
+so minifier noise between releases does not matter. If a release changes the
+shape around that text — or removes it — the tool names the failing patch and
+writes nothing:
+
+```
+[patch] Claude-Science-0.2.0.exe (0.2.0) does not match the expected shape:
+[patch]   byok-gate (condition not found before the gate message)
+```
+
+Re-derive only that patch against the new bundle. Do not relax the checks
+without reading the new source.
+
+### Web UI assets (`web-dist`)
+
+The executable embeds a gzipped asset tree (`B:/~BUN/root/assets.tar-*.gz`)
+and unpacks it to `<data_dir>/runtime/<version>-release/` on first run. The
+browser UI lives in that tree under `web-dist/`; its `index.html`, favicon, PWA
+icons and JS chunks carry their own copy of the brand. Those bytes are
+compressed inside the executable, so the byte patches above cannot reach them.
+
+`tools/rebrand-web-dist.mjs` rewrites the extracted copy: `<title>`, the
+manifest name, `favicon.svg`, the 192/512 px PWA icons, and every
+`Claude Science` string in `web-dist/assets/*.js` (regenerating the `.br`
+siblings so precompressed responses match).
+
+`aster-science.cmd` starts it in the background on every launch. It exits
+immediately when the tree is already branded, and with `--watch` it waits for
+the extraction to finish after a fresh install or an upgrade. Re-extraction
+(delete `runtime/<version>-release/` or install a new version) restores the
+upstream assets; the next launch rebrands them again.
 
 ---
 
@@ -476,7 +515,8 @@ proxy/aster-proxy.mjs          Anthropic → OpenAI translator
 proxy/run-proxy.cmd            proxy console wrapper (logs to file)
 tools/make-config.mjs          writes absolute config.toml
 tools/write-env.mjs            writes/validates env.local.cmd (map file support)
-tools/patch-aster-science.mjs  JS bundle patches
+tools/patch-aster-science.mjs  JS bundle patches (auto-discovers the newest upstream exe)
+tools/rebrand-web-dist.mjs     brands the extracted web UI (title, favicon, icons, strings)
 tools/patch-icon.mjs           in-place PE icon replacement
 tools/build-ico.mjs            packs PNGs into assets/aster.ico
 assets/source/aster.svg        logo source
@@ -521,8 +561,11 @@ per auth dir. Do not move `claude-science-data` between auth dirs; regenerate
 one-time administrator approval; run `claude-science sandbox setup` from a
 desktop session. Python/R cells work without it.
 
-**Icon still shows the old logo** — Explorer caches icons. The PE resources are
-patched (verify with an icon extractor); sign out/in or refresh the icon cache.
+**Icon still shows the old logo** — the file/Explorer icon comes from the PE
+resources (`patch-icon.mjs`); Explorer caches those, so sign out/in or refresh
+the icon cache. The browser tab icon is separate: it is `web-dist/favicon.svg`
+in the extracted runtime tree and is replaced by `tools/rebrand-web-dist.mjs`
+(the launcher runs it); hard-refresh the tab if the old favicon is cached.
 
 ---
 
